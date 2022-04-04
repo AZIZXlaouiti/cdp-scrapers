@@ -3,11 +3,16 @@ import logging
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
+from cdp_backend.database.constants import (
+    EventMinutesItemDecision,
+    MatterStatusDecision,
+    VoteDecision,
+)
 from cdp_backend.pipeline.ingestion_models import (
     Body,
     EventIngestionModel,
@@ -44,6 +49,31 @@ if Path(STATIC_FILE_DEFAULT_PATH).exists():
 
 if len(known_persons) > 0:
     log.debug(f"loaded static data for {', '.join(known_persons.keys())}")
+
+###############################################################################
+
+MATTER_ADOPTED_PATTERNS = [
+    "accepted",
+    "passed",
+    "adopted",
+    "confirmed",
+]
+MATTER_IN_PROG_PATTERNS = [
+    "passed to",
+    "placed on",
+    "continued",
+    "referred",
+]
+
+MINUTE_ITEM_PASSED_PATTERNS = [
+    # NOTE: these words while have positive conotation,
+    # does not mean the legistation was passed.
+    # it indicates the item (or a report, etc.) was accepted to be discussed and voted.
+    # "accepted",
+    # "confirmed",
+    # "adopted",
+    "passed$",
+]
 
 ###############################################################################
 
@@ -99,77 +129,231 @@ def make_efile_url(efile_page_url: str) -> str:
     return f"{efile_page_url}File/Document"
 
 
+def get_disposition(minute_section: Tag) -> str:
+    """
+    Return disposition string given within minute_section <div>
+    on the event web page
+
+    Parameters
+    ----------
+    minute_section: Tag
+        <div> within event web page for a given event minute item
+
+    Returns
+    -------
+    disposition: str
+        Disposition string for the event minute item
+        e.g. Accepted, Passed, Placed on file
+    """
+    result_status_element_sibling = minute_section.find(
+        "div", text=re.compile("Disposition"), attrs={"class": "field__label"}
+    )
+    result_status_element = result_status_element_sibling.next_sibling
+    return result_status_element.text
+
+
+def disposition_to_minute_decision(
+    disposition: str,
+) -> Optional[EventMinutesItemDecision]:
+    """
+    Decide EventMinutesItemDecision constant from event minute item disposition
+
+    Parameters
+    ----------
+    disposition: str
+        Disposition event web page for a given item
+        e.g. Passed, Continued
+
+    Returns
+    -------
+    decision: Optional[EventMinutesItemDecision]
+
+    See Also
+    --------
+    MINUTE_ITEM_PASSED_PATTERNS
+    """
+    for pattern in MINUTE_ITEM_PASSED_PATTERNS:
+        if re.search(pattern, disposition, re.I):
+            return EventMinutesItemDecision.PASSED
+    return None
+
+
+def separate_name_from_title(title_and_name: str) -> str:
+    """
+    Return just name
+
+    Parameters
+    ----------
+    title_and_name: str
+        e.g. Mayor Ted Wheeler
+
+    Returns
+    -------
+    name: str
+        tile_name_name with first word removed e.g. Ted Wheeler
+
+    Notes
+    -----
+    first word in title_and_name is presumed to be title
+    """
+    # title_and_name:
+    #   The title (Mayor of Commissioner) and name of a Portland City Commission
+    #   member.
+    #   e.g., Mayor Ted Wheeler, Commissioner Carmen Rubio
+
+    name_index = title_and_name.find(" ")
+    return title_and_name[name_index + 1 :]
+
+
 class PortlandScraper(IngestionModelScraper):
     def __init__(self):
         super().__init__(timezone="America/Los_Angeles")
 
-    def get_person(self, name: str) -> Optional[Person]:
-        global known_persons
-        try:
-            return known_persons[name]
-        except KeyError:
-            pass
-
-        # TODO: If here means we have incomplete portland-static.json.
-        #       Get information from the bottom of
-        #       https://www.portland.gov/council-clerk/engage.
-        #       Should add to known_persons so we don't query this same person again.
-        return None
-
-    def get_matter(self, event_page: BeautifulSoup) -> Optional[Matter]:
-        # TODO:
-        # matter_type:
-        #   Each item listed on agenda page begins with a descriptive phrase,
-        #   and at the end of this description its type is listed within parentheses.
-        #   e.g. “Request of the … (Communication)” -> matter_type = “communication”
-        # name:
-        #   1. “Document number” if listed. Or, if not listed
-        #   2. Type + item number? e.g. “Ordinance 862”
-        # result_status:
-        #   From same information as for EventMinutesItem.decision, i.e. “Disposition”.
-        #   e.g. “Passed to second reading” -> IN_PROGRESS
-        # sponsors:
-        #   Some items listed on agenda page has “Introduced by” field with name.
-        # title:
-        #   The first description phrase in each item on agenda page.
-        #   This is usually hyperlinked to another page with more details.
-
-        return self.get_none_if_empty(
-            Matter(matter_type=None, name=None, sponsors=None, title=None),
-        )
-
-    def get_supporting_files(
-        self, event_page: BeautifulSoup, minutes_item_index: int
-    ) -> Optional[List[SupportingFile]]:
+    def get_person(self, name: str) -> Person:
         """
-        Return SupportingFiles for a given EventMinutesItems
+        Return matching Person from portland-static.json
 
         Parameters
         ----------
-        event_page: BeautifulSoup
-            Event web page e.g. https://www.portland.gov/council/agenda/yyyy/m/d
-            loaded in BeautifulSoup
+        name: str
+            Person full name
 
-        minutes_item_index: int
-            EventMinutesItem index on event_page
+        Returns
+        -------
+        person: Person
+            Matching Person from portland-static.json
+
+        Raises
+        ------
+        KeyError
+            If name does not exist in portland-static.json
+
+        References
+        ----------
+        portland-static.json
+        """
+        if name not in known_persons:
+            raise KeyError(f"{name} is unknown. Please update portland-static.json")
+
+        return known_persons[name]
+
+    def get_matter(self, minute_section: Tag) -> Optional[Matter]:
+        """
+        Make Matter from information in minute_section
+
+        Parameters
+        ----------
+        minute_section: Tag
+            <div> within event web page for a given event minute item
+
+        Returns
+        -------
+        matter: Optional[Matter]
+            Matter if required information could be parsed from minute_section
+        """
+        # Find document number
+        doc_number_element_sibling = minute_section.find(
+            "div", text=re.compile("Document number"), attrs={"class": "field__label"}
+        )
+
+        # If there is no document number, skip this minute item
+        if doc_number_element_sibling is None:
+            return None
+        doc_number_element = doc_number_element_sibling.next_sibling
+        doc_number = doc_number_element.find("div", class_="field__item").text.strip()
+
+        # Find title
+        title_div = minute_section.find("div", class_="council-document__title")
+        matter_title = title_div.find("a").text.strip()
+
+        # Find type
+        title_div.find("a").clear()
+        matter_type = title_div.text.strip()
+        if matter_type[0] == "(" and matter_type[-1] == ")":
+            matter_type = matter_type[1:-1]
+
+        # Find result status
+        result_status = get_disposition(minute_section)
+        # strings like "passed to second reading" is better to catch
+        # before searching for "passed".
+        # so test for IN_PROGRESS first.
+        for pattern in MATTER_IN_PROG_PATTERNS:
+            if re.search(pattern, result_status, re.I):
+                result_status = MatterStatusDecision.IN_PROGRESS
+                break
+        else:
+            for pattern in MATTER_ADOPTED_PATTERNS:
+                if re.search(pattern, result_status, re.I):
+                    result_status = MatterStatusDecision.ADOPTED
+                    break
+            else:
+                result_status = None
+
+        # Find the sponsors
+        sponsor_element_uncle = minute_section.find(
+            "div", text=re.compile("Introduced by"), attrs={"class": "field__label"}
+        )
+        sponsor_list = None
+        if sponsor_element_uncle is not None:
+            sponsor_element_parent = sponsor_element_uncle.next_sibling
+            sponsor_elements = sponsor_element_parent.find_all(
+                "div", class_="field__item"
+            )
+            sponsor_list = reduced_list(
+                [
+                    self.get_person(
+                        separate_name_from_title(sponsor_element.text.strip())
+                    )
+                    for sponsor_element in sponsor_elements
+                ]
+            )
+
+        return self.get_none_if_empty(
+            Matter(
+                matter_type=matter_type,
+                name=doc_number,
+                sponsors=sponsor_list,
+                title=matter_title,
+                result_status=result_status,
+            ),
+        )
+
+    def get_supporting_files(
+        self, minute_section: Tag
+    ) -> Optional[List[SupportingFile]]:
+        """
+        Return SupportingFiles for a given EventMinutesItem
+
+        Parameters
+        ----------
+        minute_section: Tag
+            <div> within event web page for a given event minute item
 
         Returns
         -------
         supporting files: Optional[List[SupportingFile]]
-            Supporting files listed on the event minutes item's details page
+
+        Notes
+        -----
+        Follow hyperlink to go to minutes item details page.
+        On the details page look for directly-linked files
+        and externally-hosted efiles.
+
+        See Also
+        --------
+        make_efile_url()
         """
         try:
             # on the event page, event minute item titles are listed
             # in <div> with a particular class attribute.
             # so look for the minute_item_index-th such <div> on the event page
-            div = event_page.find_all(
+            div = minute_section.find(
                 "div", class_="field--label-hidden council-document__title"
-            )[minutes_item_index]
+            )
             # <a href="/council/documents/communication/placed-file/295-2021">
             details_url = f'https://www.portland.gov{div.find("a")["href"]}'
-        except (IndexError, TypeError):
-            # find_all() returned list with size <= minutes_item_index
-            # or find("a") did not succeed
+        except (AttributeError, TypeError):
+            # minute_section.find() or div.find() failed
             return None
 
         # load the mintues item details page that may have links to supporting files
@@ -227,56 +411,122 @@ class PortlandScraper(IngestionModelScraper):
         # remove any Nones
         return reduced_list(supporting_files)
 
-    def get_votes(self, event_page: BeautifulSoup) -> Optional[List[Vote]]:
-        # TODO:
-        # Voting results are listed on agenda page for some items, like
-        # Votes: Commissioner Mingus Mapps Yea
-        #        Commissioner Carmen Rubio Yea
-        #        Commissioner Dan Ryan Yea
-        #        Commissioner Jo Ann Hardesty Yea
-        #        Mayor Ted Wheeler Yea.
-        # Have only seen “Yea”. We have several constants for Vote.decision.
-        # Clearly “Yea” -> VoteDecision.APPROVE, but we don’t have enough information
-        # for what words to map to other constants.
+    def get_votes(self, minute_section: Tag) -> Optional[List[Vote]]:
+        """
+        Look for 'Votes:' in minute_section and
+        create a Vote object for each line
 
-        return reduced_list(
-            [
-                self.get_none_if_empty(
-                    Vote(decision=None, person=self.get_person(None))
-                ),
-            ],
+        Parameters
+        ----------
+        minute_section: Tag
+            <div> within event web page for a given event minute item
+
+        Returns
+        -------
+        votes: Optional[List[Vote]]
+            Votes for corresponding event minute item if found
+        """
+        vote_element_uncle = minute_section.find(
+            "div", text=re.compile("Votes"), attrs={"class": "field__label"}
         )
+        if vote_element_uncle is None:
+            return None
+        vote_element_parent = vote_element_uncle.next_sibling
+        vote_elements = vote_element_parent.find_all("div", class_="relation--type-")
+        vote_list = []
+        for vote_element in vote_elements:
+            vote = vote_element.text.strip()
+            # at this point vote string is like
+            # Commissioner Jo Ann Hardesty Absent
+            # Commissioner Mingus Mapps Yea
+            is_absent = "absent" in vote.lower()
+            vote = re.sub("absent", "", vote, flags=re.I)
+
+            if "yea" in vote.lower():
+                vote = re.sub("yea", "", vote, flags=re.I)
+                decision = VoteDecision.APPROVE
+                if is_absent:
+                    decision = VoteDecision.ABSENT_APPROVE
+            elif "nay" in vote.lower():
+                vote = re.sub("nay", "", vote, flags=re.I)
+                decision = VoteDecision.REJECT
+                if is_absent:
+                    decision = VoteDecision.ABSENT_REJECT
+            elif is_absent:
+                decision = VoteDecision.ABSENT_NON_VOTING
+            else:
+                decision = None
+
+            # at this point any decision token like yea has been removed from vote
+            name = separate_name_from_title(vote.strip())
+            vote_list.append(
+                self.get_none_if_empty(
+                    Vote(decision=decision, person=self.get_person(name))
+                )
+            )
+
+        return reduced_list(vote_list)
 
     def get_event_minutes(
         self, event_page: BeautifulSoup
     ) -> Optional[List[EventMinutesItem]]:
-        # TODO:
-        # decision:
-        # Some items listed on agenda page have “Disposition” like “passed”.
-        # Have not yet found what they use to mean “failed.”
+        """
+        Make EventMinutesItem from each relation--type-agenda-item <div>
+        on event_page
 
-        # think we will let MinutesItem.name = Matter.name
-        #                   MinutesItem.description = Matter.title
-        return reduced_list(
-            [
+        Parameters
+        ----------
+        event_page: BeautifulSoup
+            Web page for the meeting loaded as a bs4 object
+
+        Returns
+        -------
+        event minute items: Optional[List[EventMinutesItem]]
+        """
+        minute_sections = event_page.find_all(
+            "div", class_="relation--type-agenda-item"
+        )
+        event_minute_items = []
+        for minute_section in minute_sections:
+            matter = self.get_matter(minute_section)
+            if matter is not None:
+                minutes_item = self.get_none_if_empty(
+                    MinutesItem(name=matter.name, description=matter.title)
+                )
+            else:
+                minutes_item = None
+
+            event_minute_items.append(
                 self.get_none_if_empty(
                     EventMinutesItem(
-                        decision=None,
-                        index=0,
-                        matter=self.get_matter(event_page),
-                        minutes_item=MinutesItem(name=None, description=None),
-                        # TODO: need to call get_supporting_files()
-                        # with the minutes item's index on the current event page
-                        # or some similar minutes item differentiator
-                        # from other minutes items on the event page
-                        # supporting_files=self.get_supporting_files(event_page),
-                        votes=self.get_votes(event_page),
-                    ),
-                ),
-            ],
-        )
+                        decision=disposition_to_minute_decision(
+                            get_disposition(minute_section)
+                        ),
+                        matter=matter,
+                        minutes_item=minutes_item,
+                        supporting_files=self.get_supporting_files(minute_section),
+                        votes=self.get_votes(minute_section),
+                    )
+                )
+            )
+
+        return reduced_list(event_minute_items)
 
     def get_sessions(self, event_page: BeautifulSoup) -> Optional[List[Session]]:
+        """
+        Parse meeting video URIs from event_page,
+        return Session for each video found.
+
+        Parameters
+        ----------
+        event_page: BeautifulSoup
+            Web page for the meeting loaded as a bs4 object
+
+        Returns
+        -------
+        sessions: Optional[List[Session]]
+            Session for each video found on event_page
+        """
         # each session's meta data is given in <div class="session-meta">
         # including youtube video url for the session, if available
         # <div class="session-meta">
@@ -293,8 +543,8 @@ class PortlandScraper(IngestionModelScraper):
             # plenty of sessions have no video listed so must check.
             # recall we require video_uri for a valid Session.
             video_iframe = session_div.find("iframe", src=re.compile(".*youtube.*"))
-            if session_time and video_iframe:
 
+            if session_time and video_iframe:
                 sessions.append(
                     self.get_none_if_empty(
                         Session(
@@ -305,7 +555,7 @@ class PortlandScraper(IngestionModelScraper):
                                 )
                             ),
                             session_index=session_index,
-                            video_uri=video_iframe["src"],
+                            video_uri=video_iframe["src"].split("?")[0],
                         )
                     )
                 )
@@ -314,33 +564,46 @@ class PortlandScraper(IngestionModelScraper):
 
         return reduced_list(sessions)
 
-    def get_agenda_uri(self, event_page: BeautifulSoup) -> str:
+    def get_agenda_uri(self, event_page: BeautifulSoup) -> Optional[str]:
         """
-        Find the uri for the file containing the agenda at each Portland, OR city
+        Find the uri for the file containing the agenda for a Portland, OR city
         council meeting
 
         Parameters
         ----------
-        event_page: The page for the meeting
+        event_page: BeautifulSoup
+            Web page for the meeting loaded as a bs4 object
 
         Returns
         -------
-        agenda_uri: The uri for the file containing the meeting's agenda
+        agenda_uri: Optional[str]
+            The uri for the file containing the meeting's agenda
         """
         agenda_uri_element = event_page.find(
             "a", text=re.compile("Disposition Agenda"), attrs={"class": "btn-cta"}
         )
         if agenda_uri_element is not None:
-            return agenda_uri_element["href"] + "/File/Document"
+            return make_efile_url(agenda_uri_element["href"])
         parent_agenda_uri_element = event_page.find("div", {"class": "inline-flex"})
         agenda_uri_element = parent_agenda_uri_element.find("a")
         if agenda_uri_element is not None:
-            return "https://www.portland.gov" + agenda_uri_element["href"]
+            return f"https://www.portland.gov{agenda_uri_element['href']}"
         return None
 
     def get_event(self, event_time: datetime) -> Optional[EventIngestionModel]:
         """
-        Information for council meeting on given date if available
+        Portland, OR city council meeting information for a specific date
+
+        Parameters
+        ----------
+        event_time: datetime
+            Meeting date
+
+        Returns
+        -------
+        Optional[EventIngestionModel]
+            None if there was no meeting on event_time
+            or information for the meeting did not meet minimal CDP requirements.
         """
         # try to load https://www.portland.gov/council/agenda/yyyy/m/d
         event_page = load_web_page(
@@ -352,13 +615,6 @@ class PortlandScraper(IngestionModelScraper):
         if not event_page.status:
             # no meeting on requested day
             return None
-
-        # TODO:
-        # agenda_uri:
-        # 1. URL to *agenda*pdf near the top of agenda page. Or,
-        # 2. First, follow URL in “disposition agenda” link button near the top
-        #    page (e.g. https://efiles.portlandoregon.gov/record/14654925).
-        #    Then get the URL from the “Download” button on that subsequent web page.
 
         return self.get_none_if_empty(
             EventIngestionModel(
@@ -411,3 +667,35 @@ class PortlandScraper(IngestionModelScraper):
             # for easier iterate there
             collapse=False,
         )
+
+
+def get_portland_events(
+    from_dt: Optional[datetime] = None,
+    to_dt: Optional[datetime] = None,
+    **kwargs: Any,
+) -> List[EventIngestionModel]:
+    """
+    Public API for use in instances.__init__ so that this func can be attached
+    as an attribute to cdp_scrapers.instances module.
+    Thus the outside world like cdp-backend can get at this by asking for
+    "get_portland_events".
+
+    Parameters
+    ----------
+    from_dt: datetime, optional
+        The timespan beginning datetime to query for events after.
+        Default is 2 days from UTC now
+    to_dt: datetime, optional
+        The timespan end datetime to query for events before.
+        Default is UTC now
+
+    Returns
+    -------
+    events: List[EventIngestionModel]
+
+    See Also
+    --------
+    cdp_scrapers.instances.__init__.py
+    """
+    scraper = PortlandScraper()
+    return scraper.get_events(begin=from_dt, end=to_dt, **kwargs)
