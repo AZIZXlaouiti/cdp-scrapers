@@ -1,0 +1,25 @@
+{
+    "persons": {
+        "Alex Pedersen": {
+            "name": "Alex Pedersen",
+            "is_active": true,
+            "router_string": null,
+            "email": null,
+            "phone": null,
+            "website": null,
+            "picture_uri": "https://www.seattle.gov/assets/Images/Council/Members/Pedersen/Councilmember-Alex-Pedersen_square-headshot.jpg",
+            "seat": {
+                "name": "Position 4",
+                "electoral_area": "Northeast Seattle",
+                "electoral_type": null,
+                "image_uri": "https://uploads.visitseattle.org/2015/03/Suzzallo_Reading_Room_NicholasBoos-720x313.jpg",
+                "external_source_id": null,
+                "roles": null
+            },
+            "external_source_id": null
+        }
+    
+    
+    
+    }
+}
