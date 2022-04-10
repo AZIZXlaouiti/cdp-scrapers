@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from distutils.log import debug
 import os
 import json
 from datetime import datetime, timedelta
 import io
 from httplib2 import Response
+from pathlib import Path
 from pydantic import Json
 import requests
 import fitz
@@ -17,15 +19,18 @@ from cdp_scrapers.scraper_utils import IngestionModelScraper
 from cdp_scrapers.types import ContentURIs
 from urllib import request 
 import time
-# load_dotenv()
-TOKEN = os.environ.get('TOKEN')
-###############################################################################
+from cdp_backend.database.constants import (
+    EventMinutesItemDecision,
+    MatterStatusDecision,
+    VoteDecision,
+)
 from datetime import datetime
 from typing import Dict, List, NamedTuple, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from bs4 import BeautifulSoup
 from logging import getLogger
+from time import time, sleep
 import re
 from cdp_backend.pipeline.ingestion_models import (
     Body,
@@ -34,18 +39,32 @@ from cdp_backend.pipeline.ingestion_models import (
     EventMinutesItem,
     MinutesItem,
     Vote,
-    Matter
+    Matter,
+    Person,
+    Seat
 )
-from time import time, sleep
+# load_dotenv()
+TOKEN = os.environ.get('TOKEN')
+STATIC_FILE_DEFAULT_PATH = Path(__file__).parent / "dc-static.json"
+
+known_persons: Dict[str, Person] = {}
+###############################################################################
 
 log = getLogger(__name__)
-
+STATIC_FILE_KEY_PERSONS = "persons"
 MATTER_ADOPTED_PATTERNS = [
     "accepted",
     "passed",
     "adopted",
     "confirmed",
 ]
+_vote_statuses = {
+        "approved": "pass",
+        "disapproved": "fail",
+        "failed": "fail",
+        "declined": "fail",
+        "passed": "pass",
+}
 MATTER_IN_PROG_PATTERNS = [
     "passed to",
     "placed on",
@@ -134,12 +153,11 @@ class SlidingWindow:
         )
         try:
             return r.json()
-            # print("Packet Forwarded: " + str(r.json()['actions'][0]['voteDetails']['voteResult']))
         except: 
-            print(action)    
+            return []    
 
-    def drop(self , packet):
-        print("Packet Dropped: " + str(packet))
+    def drop(self):
+        return []
 def get_sessions(body_name: str, event_time: datetime) -> Optional[List[Session]]:
     for video_body, video_archive in COMMITTEE_VIDEO_ARCHIVES.items():
         if body_name.lower() in video_body.lower():
@@ -264,28 +282,109 @@ def get_event_minutes(agenda_uri: str) -> Optional[List[EventMinutesItem]]:
             for action in result:
                 sleep(0.2)
                 minute_section = throttle.handle(packet ,re.sub(r'((PR|Bill|CER|CA) \d{1,2}-)\b',r'\g<1>0' , action[0].decode("utf8")).replace(" ", ""))
+                # NOTE when searching using legislationNumber it is advised to follow the 4-digit pattern. 
+                # e.g⇒ content parsed from text conversion (Bill 24-462) ⇒ pattern( type_of_action+period_id+’-’+4digit  ) ⇒ B24-0462 
                 packet += 1 
                 
                 minutes_item.append( EventMinutesItem(
                     minutes_item = MinutesItem(name=action[0].decode("utf8"), description=minute_section['additionalInformation']),
-                    matter = Matter(matter_type=None, name=minute_section['legislationNumber'], sponsors=None, title=minute_section['title']),
-                    decision=None,
+                    matter = get_matter(minute_section),
+                    decision=EventMinutesItemDecision.PASSED,
                     # index=0,
                 ))
         return minutes_item        
     else :
         return None
 def get_matter(minute_section: json) -> Optional[Matter]:
-    r = minute_section.json()
-    matter_title = r['title']
-    doc_number = r['legislationNumber']
+    # Sponsors 
+    sponsor_list: List[Person] = []
+    for i in minute_section["introducers"]:
+        sponsor_list.append(
+            Person(
+                name=i["memberName"],
+                is_active =True,
+            ))
+        print(i["memberName"])    
     return Matter(
-            matter_type=None,
-            name=doc_number,
-            # sponsors=sponsor_list,
-            title=matter_title,
-            # result_status=result_status,
+        matter_type=None, 
+        name=minute_section['legislationNumber'],
+        sponsors=sponsor_list,
+        title=minute_section['title'],
+        result_status=MatterStatusDecision.IN_PROGRESS
     )
+def get_person(self, name: str) -> Person:
+    if name not in known_persons:
+        raise KeyError(f"{name} is unknown. Please update dc-static.json")
+
+    return known_persons[name] 
+
+
+def get_static_person_info() -> Dict[str, Person]:
+    """
+    Scrape current council members information from dc.gov
+
+    Returns
+    -------
+    persons: Dict[str, Person]
+        keyed by name
+
+    Notes
+    -----
+    Parse https://dccouncil.us/councilmembers/
+    that contains list of current council members name, position, contact info, political affiliation
+    """
+    # this page lists current council members
+    with urlopen(
+        "https://dccouncil.us/councilmembers/"
+    ) as resp:
+        soup = BeautifulSoup(resp.read(), "html.parser")
+     
+    # keyed by name
+    persons: Dict[str, Person] = {}
+    sp = soup.select("figure + a" , href=re.compile(r'https://dccouncil.us/council/'))
+    for link in sp :
+        with urlopen(
+            link['href']
+        ) as resp:
+            soup = BeautifulSoup(resp.read(), "html.parser")
+            picture_uri = soup.select('figure a img')[0]['src']
+            name = soup.select('h1')[0].text
+            email = soup.find("a",href=re.compile(r'mailto:.*?@dccouncil'))['href']
+            phone = soup.find("a",href=re.compile(r'tel:.*?'))['href']
+            web = soup.find("a",href=re.compile(r'http:.*?.com'))
+            web = web['href'] if web else None
+        persons[name] = Person(
+            name=name,
+            picture_uri=picture_uri,
+            email=email,
+            website=web,
+            phone=phone,
+            seat=None,
+        )
+
+    return persons
+
+
+def dump_static_info(file_path: Path) -> None:
+    """
+    Call this to save current council members information as Persons
+    in json format to file_path.
+    Intended to be called once every N years when the council changes.
+
+    Parameters
+    ----------
+    file_path: Path
+        output json file pathSTATIC_FILE_KEY_PERSONS = "persons"
+    """
+    pass
+    static_info_json = {STATIC_FILE_KEY_PERSONS: {}}
+    for [name, person] in get_static_person_info().items():
+        # to allow for easy future addition of info other than Persons
+        # save under top-level key "persons" in the file
+        static_info_json[STATIC_FILE_KEY_PERSONS][name] = person.to_dict()
+
+    with open(file_path, "wt") as dump:
+        dump.write(json.dumps(static_info_json, indent=4))
 def get_votes(action: str) -> Optional[List[Vote]]:
     try :
         # r.raise_for_status()

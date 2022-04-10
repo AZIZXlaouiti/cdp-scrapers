@@ -10,8 +10,11 @@ import requests
 import dc
 import re
 ###############################################################################
-ingestionModel = dc.get_events_on_date(datetime(2022, 2, 1))
-print(ingestionModel)
+# ingestionModel = dc.get_events_on_date(datetime(2022, 2, 1))
+dc.dump_static_info(dc.STATIC_FILE_DEFAULT_PATH)
+# print(ingestionModel)
+# mail = 'mailto:jjessie@dccouncil'
+# re.compile(r'mailto:{.*}@dccouncil.us' , mail)
 def get_events(
     from_dt: datetime,
     to_dt: datetime,

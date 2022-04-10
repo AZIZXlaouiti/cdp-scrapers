@@ -1,25 +1,147 @@
 {
     "persons": {
-        "Alex Pedersen": {
-            "name": "Alex Pedersen",
+        "Phil Mendelson": {
+            "name": "Phil Mendelson",
             "is_active": true,
             "router_string": null,
-            "email": null,
-            "phone": null,
+            "email": "mailto:pmendelson@dccouncil.us",
+            "phone": "tel:(202) 724-8032",
+            "website": "http://chairmanmendelson.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/Photo-107-002-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Kenyan R. McDuffie": {
+            "name": "Kenyan R. McDuffie",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:kmcduffie@dccouncil.us",
+            "phone": "tel:(202) 724-8028",
+            "website": "http://www.kenyanmcduffieward5.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/good_mcduffie_headshot_wide-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Anita Bonds": {
+            "name": "Anita Bonds",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:abonds@dccouncil.us",
+            "phone": "tel:(202) 724-8064",
+            "website": "http://anitabonds.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/Anita-Bonds-Official-Portrait-Shot-002-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Elissa Silverman": {
+            "name": "Elissa Silverman",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:esilverman@dccouncil.us",
+            "phone": "tel:(202)-724-7772",
+            "website": "http://www.elissasilverman.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/silverman2-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        " Robert C. White, Jr.": {
+            "name": " Robert C. White, Jr.",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:rwhite@dccouncil.us",
+            "phone": "tel:(202)-724-8174",
+            "website": "http://www.RobertWhiteAtLarge.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/06/CMWhite_WebsitePhoto_small-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Christina Henderson": {
+            "name": "Christina Henderson",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:chenderson@dccouncil.us",
+            "phone": "tel:(202) 724-8105",
             "website": null,
-            "picture_uri": "https://www.seattle.gov/assets/Images/Council/Members/Pedersen/Councilmember-Alex-Pedersen_square-headshot.jpg",
-            "seat": {
-                "name": "Position 4",
-                "electoral_area": "Northeast Seattle",
-                "electoral_type": null,
-                "image_uri": "https://uploads.visitseattle.org/2015/03/Suzzallo_Reading_Room_NicholasBoos-720x313.jpg",
-                "external_source_id": null,
-                "roles": null
-            },
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2021/01/HendersonWexlerFamily_2019_030_Fotor-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Brianne K. Nadeau": {
+            "name": "Brianne K. Nadeau",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:bnadeau@dccouncil.us",
+            "phone": "tel:(202) 724-8181",
+            "website": "http://www.brianneknadeau.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/bkn-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Brooke Pinto": {
+            "name": "Brooke Pinto",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:bpinto@dccouncil.us",
+            "phone": "tel:(202) 724-8058",
+            "website": "http://www.brookepintodc.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2020/06/cmbphs-scaled-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Mary Cheh": {
+            "name": "Mary Cheh",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:mcheh@dccouncil.us",
+            "phone": "tel:(202)-724-8062",
+            "website": "http://www.marycheh.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/06/CMMC_head_shot_140_137_c1-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Janeese Lewis George": {
+            "name": "Janeese Lewis George",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:jlewisgeorge@dccouncil.us",
+            "phone": "tel:(202) 724-8052",
+            "website": null,
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2021/01/0EB064A9-D1C7-4387-945B-4DDD13AF8415-125x125-c-default.jpeg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Charles Allen": {
+            "name": "Charles Allen",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:callen@dccouncil.us",
+            "phone": "tel:(202)724-8072",
+            "website": "http://www.charlesallenward6.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/06/C._Allen_small_1-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        "Vincent C. Gray": {
+            "name": "Vincent C. Gray",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:vgray@dccouncil.us",
+            "phone": "tel:tel:(202) 724-8068",
+            "website": null,
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/03/Headshot_gray_small-125x125-c-default.jpg",
+            "seat": null,
+            "external_source_id": null
+        },
+        " Trayon White, Sr.": {
+            "name": " Trayon White, Sr.",
+            "is_active": true,
+            "router_string": null,
+            "email": "mailto:twhite@dccouncil.us",
+            "phone": "tel:(202)724-8045",
+            "website": "http://www.trayonwhite8.com/",
+            "picture_uri": "https://dccouncil.us/wp-content/uploads/2017/06/tw-125x125-c-default.jpg",
+            "seat": null,
             "external_source_id": null
         }
-    
-    
-    
     }
 }
