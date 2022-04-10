@@ -12,6 +12,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from cdp_backend.pipeline.ingestion_models import Person, Seat
+from cdp_backend.database.constants import RoleTitle
 from ..legistar_utils import (
     LEGISTAR_EV_SITE_URL,
     LegistarScraper,
@@ -78,6 +79,14 @@ class KingCountyScraper(LegistarScraper):
                 "Watch King County TV Channel 22",
             ],
             known_persons=known_persons,
+            role_replacements={
+                "Boardmember": RoleTitle.MEMBER,
+                "Mr.": RoleTitle.MEMBER,
+                "Councilmemeber DELETE": RoleTitle.COUNCILMEMBER,
+                "Vice-Chair": RoleTitle.VICE_CHAIR,
+                "Council Member": RoleTitle.COUNCILMEMBER,
+                "Policy Chair": RoleTitle.CHAIR,
+            },
         )
 
     def get_content_uris(self, legistar_ev: Dict) -> List[ContentURIs]:
