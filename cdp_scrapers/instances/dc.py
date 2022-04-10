@@ -349,7 +349,7 @@ def get_static_person_info() -> Dict[str, Person]:
             soup = BeautifulSoup(resp.read(), "html.parser")
             picture_uri = soup.select('figure a img')[0]['src']
             name = soup.select('h1')[0].text
-            email = soup.find("a",href=re.compile(r'mailto:.*?@dccouncil'))['href']
+            email = soup.find("a",href=re.compile(r'mailto:.*?@dccouncil'))['href'].replace('mailto:','')
             phone = soup.find("a",href=re.compile(r'tel:.*?'))['href']
             web = soup.find("a",href=re.compile(r'http:.*?.com'))
             web = web['href'] if web else None
