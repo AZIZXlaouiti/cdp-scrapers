@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from distutils.log import debug
+import logging
 import os
 import json
 from datetime import datetime, timedelta
@@ -44,10 +45,23 @@ from cdp_backend.pipeline.ingestion_models import (
     Seat
 )
 # load_dotenv()
+log = logging.getLogger(__name__)
 TOKEN = os.environ.get('TOKEN')
 STATIC_FILE_DEFAULT_PATH = Path(__file__).parent / "dc-static.json"
-
+STATIC_FILE_KEY_PERSONS = "persons"
 known_persons: Dict[str, Person] = {}
+
+# load long-term static data at file load-time
+if Path(STATIC_FILE_DEFAULT_PATH).exists():
+    with open(STATIC_FILE_DEFAULT_PATH, "rb") as json_file:
+        static_data = json.load(json_file)
+
+    for name, person in static_data[STATIC_FILE_KEY_PERSONS].items():
+        known_persons[name] = Person.from_dict(person)
+
+
+if len(known_persons) > 0:
+    log.debug(f"loaded static data for {', '.join(known_persons.keys())}")
 ###############################################################################
 
 log = getLogger(__name__)
@@ -58,12 +72,27 @@ MATTER_ADOPTED_PATTERNS = [
     "adopted",
     "confirmed",
 ]
-_vote_statuses = {
-        "approved": "pass",
-        "disapproved": "fail",
-        "failed": "fail",
-        "declined": "fail",
-        "passed": "pass",
+COUNCIL_NAME = {
+  'White, Robert C. Jr.':'Robert C. White, Jr',
+  'Gray, Vincent C. ':'Vincent C. Gray',
+  'Nadeau, Brianne K.':'Brianne K. Nadeau',
+  'Cheh, Mary M.':'Mary Cheh',
+  'Allen, Charles':'Charles Allen',
+  'Bonds, Anita':'Anita Bonds',
+  'McDuffie, Kenyan R. ':'Kenyan R. McDuffie',
+  'Pinto, Brooke':'Brooke Pinto',
+  'Silverman, Elissa':'Elissa Silverman',
+  'Lewis George, Janeese':'Janeese Lewis George',
+  'White, Trayon Sr.':'Trayon White, Sr',
+  'Henderson, Christina':'Christina Henderson',
+  'Mendelson, Phil':'Phil Mendelson',
+}
+_vote_status = {
+    "approved": "pass",
+    "disapproved": "fail",
+    "failed": "fail",
+    "declined": "fail",
+    "passed": "pass",
 }
 MATTER_IN_PROG_PATTERNS = [
     "passed to",
@@ -116,7 +145,6 @@ _API_BASE_URL = "https://lims.dccouncil.us/api/v2/PublicData/LegislationDetails/
 _HEADER = {
         "Authorization": '1607b76f-60c7-40d6-a0ce-d8c81b65a7a1',
         "Accept": "application/json",
-        "User-Agent": "openstates"
     }
 class SlidingWindow:
 
@@ -290,6 +318,7 @@ def get_event_minutes(agenda_uri: str) -> Optional[List[EventMinutesItem]]:
                     minutes_item = MinutesItem(name=action[0].decode("utf8"), description=minute_section['additionalInformation']),
                     matter = get_matter(minute_section),
                     decision=EventMinutesItemDecision.PASSED,
+                    votes=None
                     # index=0,
                 ))
         return minutes_item        
@@ -300,11 +329,9 @@ def get_matter(minute_section: json) -> Optional[Matter]:
     sponsor_list: List[Person] = []
     for i in minute_section["introducers"]:
         sponsor_list.append(
-            Person(
-                name=i["memberName"],
-                is_active =True,
-            ))
-        print(i["memberName"])    
+           get_person(i["memberName"])     
+        )
+    print(minute_section['actions'])    
     return Matter(
         matter_type=None, 
         name=minute_section['legislationNumber'],
@@ -312,11 +339,26 @@ def get_matter(minute_section: json) -> Optional[Matter]:
         title=minute_section['title'],
         result_status=MatterStatusDecision.IN_PROGRESS
     )
-def get_person(self, name: str) -> Person:
-    if name not in known_persons:
-        raise KeyError(f"{name} is unknown. Please update dc-static.json")
+def get_votes(action: str) -> Optional[List[Vote]]:
+    vote_list:List[Vote] = []
+    try :
+        Vote(
 
-    return known_persons[name] 
+        )
+        # r.raise_for_status()
+        pass
+    except (URLError, HTTPError) as e:
+        # code  = e.response.status_code
+        # log.warning(
+        #     e.response.text
+        # )
+        return None    
+def get_person( name: str) -> Person:
+    
+    if name not in COUNCIL_NAME:
+        raise KeyError(f"{name} is unknown. Please update dc-static.json")
+    return known_persons[COUNCIL_NAME[name]] 
+    
 
 
 def get_static_person_info() -> Dict[str, Person]:
@@ -350,7 +392,7 @@ def get_static_person_info() -> Dict[str, Person]:
             picture_uri = soup.select('figure a img')[0]['src']
             name = soup.select('h1')[0].text
             email = soup.find("a",href=re.compile(r'mailto:.*?@dccouncil'))['href'].replace('mailto:','')
-            phone = soup.find("a",href=re.compile(r'tel:.*?'))['href']
+            phone = soup.find("a",href=re.compile(r'tel:.*?'))['href'].replace('tel:','')
             web = soup.find("a",href=re.compile(r'http:.*?.com'))
             web = web['href'] if web else None
         persons[name] = Person(
@@ -385,16 +427,7 @@ def dump_static_info(file_path: Path) -> None:
 
     with open(file_path, "wt") as dump:
         dump.write(json.dumps(static_info_json, indent=4))
-def get_votes(action: str) -> Optional[List[Vote]]:
-    try :
-        # r.raise_for_status()
-        pass
-    except (URLError, HTTPError) as e:
-        # code  = e.response.status_code
-        # log.warning(
-        #     e.response.text
-        # )
-        return None
+
         
 def get_events_on_date(event_date: datetime) -> Optional[List[EventIngestionModel]]:
     try:
